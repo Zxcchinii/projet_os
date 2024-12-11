@@ -1,0 +1,9 @@
+version: '3'
+services:
+  player1:
+    build: .
+    network_mode: host
+    environment:
+      - PLAYER_NUMBER=2
+      - SERVER_URL=http://192.168.200.16:8000 
+
