@@ -1,0 +1,25 @@
+version: '3'
+services:
+  server:
+    build: ./server
+    networks:
+      - connect4-network
+    ports:
+      - "5000:5000"
+
+  player1:
+    build: ./player
+    networks:
+      - connect4-network
+    environment:
+      - PLAYER_NUMBER=1
+
+  player2:
+    build: ./player
+    networks:
+      - connect4-network
+    environment:
+      - PLAYER_NUMBER=2
+
+networks:
+  connect4-network:
