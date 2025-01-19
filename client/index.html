@@ -74,6 +74,14 @@
             50% { opacity: 1; }
             100% { opacity: 0; }
         }
+        .highlight {
+            animation: highlight 2s infinite;
+        }
+        @keyframes highlight {
+            0% { background-color: gold; }
+            50% { background-color: transparent; }
+            100% { background-color: gold; }
+        }
         .menu {
             margin-bottom: 10px;
         }
@@ -126,6 +134,7 @@
                 this.columnButtons = [];
                 this.playerNumber = null;
                 this.gameId = null;
+                this.winningCells = [];
 
                 this.initBoard();
                 this.connectToServer();
@@ -198,6 +207,9 @@
                         case 'game_update':
                             this.updateBoard(data);
                             break;
+                        case 'game_over':
+                            this.handleGameOver(data);
+                            break;
                         default:
                             console.log('Received unknown message type:', data);
                     }
@@ -247,6 +259,21 @@
                 } else {
                     this.updateGameInfo(data.current_player);
                 }
+            }
+
+            handleGameOver(data) {
+                if (data.winner) {
+                    this.highlightWinningLine(data.winning_cells);
+                }
+            }
+
+            highlightWinningLine(cells) {
+                this.winningCells = cells;
+                cells.forEach(cell => {
+                    const [row, col] = cell;
+                    const winningCell = this.cells[row][col];
+                    winningCell.classList.add('highlight');
+                });
             }
 
             updateGameInfo(currentPlayer = null) {
