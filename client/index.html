@@ -63,9 +63,16 @@
             width: 60px;
             height: 60px;
             border-radius: 50%;
-            opacity: 0.5;
+            background-color: lightgray;
+            opacity: 0;
             pointer-events: none;
             display: none;
+            animation: blink 1.5s infinite;
+        }
+        @keyframes blink {
+            0% { opacity: 0; }
+            50% { opacity: 1; }
+            100% { opacity: 0; }
         }
         .menu {
             margin-bottom: 10px;
@@ -161,7 +168,6 @@
                     if (cell.classList.contains('empty')) {
                         this.ghostToken.style.left = `${colIndex * 65}px`; // Adjust for gap
                         this.ghostToken.style.top = `${row * 65}px`; // Adjust for gap
-                        this.ghostToken.classList.add(this.playerNumber === 1 ? 'player1' : 'player2');
                         this.ghostToken.style.display = 'block';
                         break;
                     }
