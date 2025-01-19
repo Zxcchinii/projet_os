@@ -7,7 +7,7 @@ import os
 from typing import Dict, List
 
 import websockets
-from websockets.server import WebSocketServerProtocol
+from websockets.server import WebSocketServerProtocol, serve
 
 
 class Connect4Game:
@@ -222,7 +222,7 @@ class Connect4Server:
 
     async def start_server(self):
         port = int(os.getenv('PORT', 5000))
-        server = await websockets.serve(self.handle_websocket, "0.0.0.0", port)
+        server = await serve(self.handle_websocket, "0.0.0.0", port)
         self.logger.info(f"Server started on port {port}")
         await server.wait_closed()
 
