@@ -1,0 +1,37 @@
+# File: docker-compose.yml
+version: '3.8'
+
+services:
+  server:
+    build: ./server
+    ports:
+      - "5000:5000"
+    networks:
+      - connect4-network
+    restart: unless-stopped
+
+  client1:
+    build: ./client
+    ports:
+      - "8081:80"
+    networks:
+      - connect4-network
+    depends_on:
+      - server
+    environment:
+      - WEBSOCKET_SERVER=ws://server:5000
+
+  client2:
+    build: ./client
+    ports:
+      - "8082:80"
+    networks:
+      - connect4-network
+    depends_on:
+      - server
+    environment:
+      - WEBSOCKET_SERVER=ws://server:5000
+
+networks:
+  connect4-network:
+    driver: bridge

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Multiplayer Connect Four</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        .game-container {
+            background-color: #3498db;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .board {
+            display: grid;
+            grid-template-columns: repeat(7, 60px);
+            grid-gap: 5px;
+            margin-top: 10px;
+        }
+        .cell {
+            width: 60px;
+            height: 60px;
+            background-color: white;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .cell.empty { background-color: white; }
+        .cell.player1 { background-color: red; }
+        .cell.player2 { background-color: yellow; }
+        .column-selector {
+            display: grid;
+            grid-template-columns: repeat(7, 60px);
+            grid-gap: 5px;
+            margin: 10px 0;
+        }
+        .column-btn {
+            width: 60px;
+            height: 30px;
+            background-color: #2ecc71;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            color: white;
+            font-weight: bold;
+        }
+        .menu {
+            margin-bottom: 10px;
+        }
+        .menu label {
+            font-size: 16px;
+            color: white;
+        }
+        .menu select, .menu button {
+            margin-left: 5px;
+            padding: 5px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div id="connectionStatus">Connecting to server...</div>
+        <div class="menu">
+            <label for="modeSelect">Choose Mode:</label>
+            <select id="modeSelect">
+                <option value="server">Play Against Server</option>
+                <option value="client">Play Against Another Player</option>
+            </select>
+            <button id="startGame">Start Game</button>
+        </div>
+        <div id="gameInfo">Waiting for game to start...</div>
+        <div class="column-selector" id="columnSelector"></div>
+        <div class="board" id="gameBoard"></div>
+    </div>
+
+    <script>
+        document.getElementById('startGame').addEventListener('click', () => {
+            const mode = document.getElementById('modeSelect').value;
+            const game = new Connect4MultiplayerClient(serverUrl, mode);
+        });
+
+        class Connect4MultiplayerClient {
+            constructor(serverUrl, mode) {
+                this.serverUrl = serverUrl;
+                this.mode = mode;
+                this.board = document.getElementById('gameBoard');
+                this.columnSelector = document.getElementById('columnSelector');
+                this.gameInfo = document.getElementById('gameInfo');
+                this.connectionStatus = document.getElementById('connectionStatus');
+                this.cells = [];
+                this.columnButtons = [];
+                this.playerNumber = null;
+                this.gameId = null;
+
+                this.initBoard();
+                this.connectToServer();
+            }
+
+            initBoard() {
+                for (let row = 0; row < 6; row++) {
+                    let rowCells = [];
+                    for (let col = 0; col < 7; col++) {
+                        const cell = document.createElement('div');
+                        cell.classList.add('cell', 'empty');
+                        cell.dataset.row = row;
+                        cell.dataset.col = col;
+                        this.board.appendChild(cell);
+                        rowCells.push(cell);
+                    }
+                    this.cells.push(rowCells);
+                }
+
+                for (let col = 0; col < 7; col++) {
+                    const button = document.createElement('button');
+                    button.textContent = col;
+                    button.classList.add('column-btn');
+                    button.addEventListener('click', () => this.makeMove(col));
+                    this.columnSelector.appendChild(button);
+                    this.columnButtons.push(button);
+                }
+            }
+
+            connectToServer() {
+                this.socket = new WebSocket(this.serverUrl);
+
+                this.socket.onopen = () => {
+                    this.socket.send(JSON.stringify({
+                        type: 'select_mode',
+                        mode: this.mode
+                    }));
+                    this.connectionStatus.textContent = 'Connected. Waiting for a game...';
+                };
+
+                this.socket.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    switch (data.type) {
+                        case 'game_status':
+                            this.handleGameStatus(data);
+                            break;
+                        case 'game_update':
+                            this.updateBoard(data);
+                            break;
+                        default:
+                            console.log('Received unknown message type:', data);
+                    }
+                };
+
+                this.socket.onerror = () => {
+                    this.connectionStatus.textContent = 'Connection error!';
+                };
+
+                this.socket.onclose = () => {
+                    this.connectionStatus.textContent = 'Disconnected. Reconnecting...';
+                    setTimeout(() => this.connectToServer(), 3000);
+                };
+            }
+
+            handleGameStatus(data) {
+                if (data.status === 'waiting') {
+                    this.connectionStatus.textContent = 'Waiting for another player...';
+                } else if (data.status === 'started') {
+                    this.playerNumber = data.player_number;
+                    this.gameId = data.game_id;
+                    this.connectionStatus.textContent = `Game started! You are Player ${this.playerNumber}`;
+                    this.updateGameInfo();
+                }
+            }
+
+            updateBoard(data) {
+                for (let row = 0; row < 6; row++) {
+                    for (let col = 0; col < 7; col++) {
+                        const cell = this.cells[row][col];
+                        cell.classList.remove('player1', 'player2', 'empty');
+                        if (data.board[row][col] === 1) {
+                            cell.classList.add('player1');
+                        } else if (data.board[row][col] === 2) {
+                            cell.classList.add('player2');
+                        } else {
+                            cell.classList.add('empty');
+                        }
+                    }
+                }
+
+                if (data.game_over) {
+                    this.gameInfo.textContent = data.winner
+                        ? `Game Over! Winner: Player ${data.winner}`
+                        : 'Game Over! Draw';
+                    this.disableColumnButtons();
+                } else {
+                    this.updateGameInfo(data.current_player);
+                }
+            }
+
+            updateGameInfo(currentPlayer = null) {
+                if (currentPlayer) {
+                    if (currentPlayer === this.playerNumber) {
+                        this.gameInfo.textContent = 'Your turn!';
+                        this.enableColumnButtons();
+                    } else {
+                        this.gameInfo.textContent = "Opponent's turn";
+                        this.disableColumnButtons();
+                    }
+                }
+            }
+
+            enableColumnButtons() {
+                this.columnButtons.forEach(button => button.disabled = false);
+            }
+
+            disableColumnButtons() {
+                this.columnButtons.forEach(button => button.disabled = true);
+            }
+
+            makeMove(column) {
+                if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                    this.socket.send(JSON.stringify({
+                        type: 'move',
+                        column: column
+                    }));
+                }
+            }
+        }
+
+        const serverUrl = 'ws://localhost:5000'; // Update to your server URL if necessary
+    </script>
+</body>
+</html>
