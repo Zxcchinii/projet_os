@@ -148,7 +148,7 @@ class Connect4Server:
 
     async def play_as_server(self, game: Connect4Game):
         """Simulate server moves for a single-player game."""
-        max_turns = 42
+        max_turns = 10000
         turns = 0
         while not game.game_over and turns < max_turns:
             if game.current_player == 2:  # Server's turn

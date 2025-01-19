@@ -25,6 +25,7 @@
             grid-template-columns: repeat(7, 60px);
             grid-gap: 5px;
             margin-top: 10px;
+            position: relative;
         }
         .cell {
             width: 60px;
@@ -56,6 +57,16 @@
             color: white;
             font-weight: bold;
         }
+        .ghost-token {
+            position: absolute;
+            top: 0;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            opacity: 0.5;
+            pointer-events: none;
+            display: none;
+        }
         .menu {
             margin-bottom: 10px;
         }
@@ -73,7 +84,7 @@
 <body>
     <div class="game-container">
         <div id="connectionStatus">Connecting to server...</div>
-        <div class="menu">
+        <div class="menu" id="menu">
             <label for="modeSelect">Choose Mode:</label>
             <select id="modeSelect">
                 <option value="server">Play Against Server</option>
@@ -83,13 +94,16 @@
         </div>
         <div id="gameInfo">Waiting for game to start...</div>
         <div class="column-selector" id="columnSelector"></div>
-        <div class="board" id="gameBoard"></div>
+        <div class="board" id="gameBoard">
+            <div id="ghostToken" class="ghost-token"></div>
+        </div>
     </div>
 
     <script>
         document.getElementById('startGame').addEventListener('click', () => {
             const mode = document.getElementById('modeSelect').value;
             const game = new Connect4MultiplayerClient(serverUrl, mode);
+            document.getElementById('menu').style.display = 'none'; // Hide the menu after game starts
         });
 
         class Connect4MultiplayerClient {
@@ -100,6 +114,7 @@
                 this.columnSelector = document.getElementById('columnSelector');
                 this.gameInfo = document.getElementById('gameInfo');
                 this.connectionStatus = document.getElementById('connectionStatus');
+                this.ghostToken = document.getElementById('ghostToken');
                 this.cells = [];
                 this.columnButtons = [];
                 this.playerNumber = null;
@@ -131,6 +146,30 @@
                     this.columnSelector.appendChild(button);
                     this.columnButtons.push(button);
                 }
+
+                // Show ghost token on hover
+                this.columnButtons.forEach((button, colIndex) => {
+                    button.addEventListener('mouseover', () => this.showGhostToken(colIndex));
+                    button.addEventListener('mouseout', () => this.hideGhostToken());
+                });
+            }
+
+            showGhostToken(colIndex) {
+                // Find the lowest empty row in the column
+                for (let row = 5; row >= 0; row--) {
+                    const cell = this.cells[row][colIndex];
+                    if (cell.classList.contains('empty')) {
+                        this.ghostToken.style.left = `${colIndex * 65}px`; // Adjust for gap
+                        this.ghostToken.style.top = `${row * 65}px`; // Adjust for gap
+                        this.ghostToken.classList.add(this.playerNumber === 1 ? 'player1' : 'player2');
+                        this.ghostToken.style.display = 'block';
+                        break;
+                    }
+                }
+            }
+
+            hideGhostToken() {
+                this.ghostToken.style.display = 'none';
             }
 
             connectToServer() {
