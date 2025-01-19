@@ -3,10 +3,12 @@ import json
 import random
 import uuid
 import logging
+import os
 from typing import Dict, List
 
 import websockets
 from websockets.server import WebSocketServerProtocol
+
 
 class Connect4Game:
     def __init__(self, game_id: str):
@@ -16,7 +18,29 @@ class Connect4Game:
         self.players: Dict[int, str] = {}  # {player_number: player_id}
         self.game_over = False
         self.winner = None
-        self.max_players = 2
+        self.lock = asyncio.Lock()  # Prevent race conditions
+
+    async def make_move(self, player, column):
+        async with self.lock:
+            # Validate column
+            if column < 0 or column >= 7:
+                return False, "Invalid column"
+
+            # Find first empty row in the column
+            for row in range(5, -1, -1):
+                if self.board[row][column] == 0:
+                    self.board[row][column] = player
+
+                    # Check for winner
+                    if self.check_winner(player):
+                        self.game_over = True
+                        self.winner = player
+
+                    # Switch player
+                    self.current_player = 3 - player
+                    return True, "Move successful"
+
+            return False, "Column is full"
 
     def check_winner(self, player):
         # Horizontal check
@@ -34,35 +58,13 @@ class Connect4Game:
         # Diagonal checks
         for row in range(3):
             for col in range(4):
-                # Diagonal down-right
                 if all(self.board[row + i][col + i] == player for i in range(4)):
                     return True
-                # Diagonal down-left
                 if all(self.board[row + i][col + 3 - i] == player for i in range(4)):
                     return True
 
         return False
 
-    def make_move(self, player, column):
-        # Validate column
-        if column < 0 or column >= 7:
-            return False, "Invalid column"
-
-        # Find first empty row in the column
-        for row in range(5, -1, -1):
-            if self.board[row][column] == 0:
-                self.board[row][column] = player
-
-                # Check for winner
-                if self.check_winner(player):
-                    self.game_over = True
-                    self.winner = player
-
-                # Switch player
-                self.current_player = 3 - player
-                return True, "Move successful"
-
-        return False, "Column is full"
 
 class Connect4Server:
     def __init__(self):
@@ -96,15 +98,12 @@ class Connect4Server:
         elif mode == "client":
             # Handle multiplayer registration
             if not self.game_waiting:
-                # Create a new game and wait for another player
                 game_id = str(uuid.uuid4())
                 game = Connect4Game(game_id)
                 self.games[game_id] = game
                 self.game_waiting = game
 
-                # Assign first player
                 game.players[1] = player_id
-
                 await websocket.send(json.dumps({
                     'type': 'game_status',
                     'status': 'waiting',
@@ -113,12 +112,12 @@ class Connect4Server:
                 }))
                 self.logger.info(f"Player {player_id} created game {game_id}")
 
+                asyncio.create_task(self.timeout_waiting_game(game_id, 60))  # Add timeout for waiting games
             else:
-                # Join existing waiting game
                 game = self.game_waiting
                 game.players[2] = player_id
+                self.game_waiting = None
 
-                # Notify both players that the game is starting
                 for player_number, p_id in game.players.items():
                     player_socket = self.player_connections[p_id]
                     await player_socket.send(json.dumps({
@@ -127,24 +126,38 @@ class Connect4Server:
                         'player_number': player_number,
                         'game_id': game.game_id
                     }))
-
-                # Reset waiting game
-                self.game_waiting = None
                 self.logger.info(f"Game {game.game_id} started with two players")
+
+        else:
+            await websocket.send(json.dumps({
+                'type': 'error',
+                'message': 'Invalid mode selected'
+            }))
+            self.logger.warning(f"Player {player_id} selected invalid mode: {mode}")
+            return player_id
 
         return player_id
 
+    async def timeout_waiting_game(self, game_id, timeout):
+        """Timeout for waiting games."""
+        await asyncio.sleep(timeout)
+        if self.game_waiting and self.game_waiting.game_id == game_id:
+            self.logger.info(f"Timeout for waiting game {game_id}")
+            del self.games[game_id]
+            self.game_waiting = None
+
     async def play_as_server(self, game: Connect4Game):
         """Simulate server moves for a single-player game."""
-        while not game.game_over:
+        max_turns = 42
+        turns = 0
+        while not game.game_over and turns < max_turns:
             if game.current_player == 2:  # Server's turn
                 valid_move = False
                 while not valid_move:
                     column = random.randint(0, 6)
-                    valid_move, _ = game.make_move(2, column)
+                    valid_move, _ = await game.make_move(2, column)
                 self.logger.info(f"Server played in column {column}")
 
-                # Send game state update to the player
                 for player_id in game.players.values():
                     if player_id in self.player_connections:
                         await self.player_connections[player_id].send(json.dumps({
@@ -155,23 +168,17 @@ class Connect4Server:
                             'winner': game.winner
                         }))
             await asyncio.sleep(1)
+            turns += 1
 
     async def handle_move(self, player_id, data):
-        # Find the game the player is in
         for game in self.games.values():
             if player_id in game.players.values():
-                # Determine player number
                 player_number = list(game.players.keys())[list(game.players.values()).index(player_id)]
-
-                # Validate it's the player's turn
                 if game.current_player != player_number:
                     return {'success': False, 'message': 'Not your turn'}
 
-                # Make the move
-                success, message = game.make_move(player_number, data['column'])
-
+                success, message = await game.make_move(player_number, data['column'])
                 if success:
-                    # Broadcast updated game state to both players
                     for p_number, p_id in game.players.items():
                         player_socket = self.player_connections[p_id]
                         await player_socket.send(json.dumps({
@@ -181,21 +188,13 @@ class Connect4Server:
                             'game_over': game.game_over,
                             'winner': game.winner
                         }))
-
-                return {
-                    'success': success, 
-                    'message': message,
-                    'board': game.board,
-                    'current_player': game.current_player,
-                    'game_over': game.game_over,
-                    'winner': game.winner
-                }
+                return {'success': success, 'message': message}
 
         return {'success': False, 'message': 'Game not found'}
 
     async def handle_websocket(self, websocket: WebSocketServerProtocol, path):
+        player_id = None
         try:
-            # Wait for mode selection from the client
             mode = None
             async for message in websocket:
                 data = json.loads(message)
@@ -204,38 +203,30 @@ class Connect4Server:
                     break
 
             if mode:
-                await self.register_player(websocket, mode)
+                player_id = await self.register_player(websocket, mode)
 
-                # Handle incoming messages
                 async for message in websocket:
-                    try:
-                        data = json.loads(message)
-
-                        if data['type'] == 'move':
-                            response = await self.handle_move(player_id, data)
-                            await websocket.send(json.dumps(response))
-
-                    except Exception as e:
-                        self.logger.error(f"Error processing message: {e}")
+                    data = json.loads(message)
+                    if data['type'] == 'move':
+                        response = await self.handle_move(player_id, data)
+                        await websocket.send(json.dumps(response))
 
         except websockets.exceptions.ConnectionClosed:
             self.logger.info(f"Player {player_id} disconnected")
-            # TODO: Implement game cleanup for disconnected players
+            if player_id in self.player_connections:
+                del self.player_connections[player_id]
 
         finally:
-            # Remove player connection
             if player_id in self.player_connections:
                 del self.player_connections[player_id]
 
     async def start_server(self):
-        server = await websockets.serve(
-            self.handle_websocket, 
-            "0.0.0.0", 5000
-        )
-        self.logger.info("Multiplayer Connect Four Server started")
+        port = int(os.getenv('PORT', 5000))
+        server = await websockets.serve(self.handle_websocket, "0.0.0.0", port)
+        self.logger.info(f"Server started on port {port}")
         await server.wait_closed()
 
-# Run the server
+
 if __name__ == "__main__":
     game_server = Connect4Server()
     asyncio.run(game_server.start_server())
